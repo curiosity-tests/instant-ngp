@@ -1,4 +1,5 @@
 name: CI
+run-name: "CI ${{ inputs.leg || github.event_name }} ${{ inputs.racecar_run }}"
 
 on:
   push:
@@ -8,6 +9,24 @@ on:
     branches:
       - master
 
+  workflow_dispatch:
+    inputs:
+      leg:
+        description: "baseline (uninstrumented) or instrumented (under chalk/curiosity)"
+        type: choice
+        options: [instrumented, baseline]
+        default: baseline
+      profile:
+        description: "CrashOverride chalk profile"
+        type: string
+        default: curiosity-tests-racecar
+      racecar_run:
+        description: "racecar correlation token, echoed into the run name"
+        type: string
+        default: ""
+
+env:
+  CHALK_ON: ${{ inputs.leg == 'instrumented' }}
 jobs:
   build_linux:
     name: Build on linux systems
@@ -93,40 +112,6 @@ jobs:
             arch: 120
             python: "3.12"
             recommended_gpus: "RTX-5000"
-          - os: windows-2022
-            visual_studio: "Visual Studio 17 2022"
-            cuda: "12.6.3"
-            arch: 89
-            python: "3.12"
-          - os: windows-2022
-            visual_studio: "Visual Studio 17 2022"
-            cuda: "12.6.3"
-            arch: 86
-            python: "3.11"
-            recommended_gpus: "RTX-3000-and-4000"
-          - os: windows-2022
-            visual_studio: "Visual Studio 17 2022"
-            cuda: "12.6.3"
-            arch: 75
-            python: "3.10"
-            recommended_gpus: "RTX-2000"
-          - os: windows-2022
-            visual_studio: "Visual Studio 17 2022"
-            cuda: "12.6.3"
-            arch: 70
-            python: "3.9"
-          - os: windows-2022
-            visual_studio: "Visual Studio 17 2022"
-            cuda: "12.6.3"
-            arch: 61
-            python: "3.8"
-            recommended_gpus: "GTX-1000"
-          - os: windows-2022
-            visual_studio: "Visual Studio 17 2022"
-            cuda: "12.6.3"
-            arch: 53
-            python: "3.7"
-            cmake_flags: "-DNGP_BUILD_WITH_GUI=OFF -DNGP_BUILD_WITH_VULKAN=OFF -DNGP_BUILD_WITH_OPTIX=OFF"
     env:
       build_dir: "build"
       config: "Release"
@@ -158,6 +143,7 @@ jobs:
         shell: cmd
         run: dir
       - name: Upload release
+        continue-on-error: true   # racecar: scan/report/push step, must not fail the build
         if: ${{ matrix.recommended_gpus }}
         uses: actions/upload-artifact@v4
         with:
@@ -188,6 +174,7 @@ jobs:
             scripts/record3d2nerf.py
 
   continuous_release:
+    continue-on-error: true   # racecar: scan job other jobs need
     name: "Update continuous development release"
     runs-on: ubuntu-latest
     permissions:
