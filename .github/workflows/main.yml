@@ -25,6 +25,9 @@ on:
         type: string
         default: ""
 
+permissions:
+  contents: read
+  id-token: write
 env:
   CHALK_ON: ${{ inputs.leg == 'instrumented' }}
 jobs:
@@ -192,6 +195,7 @@ jobs:
     name: "Update continuous development release"
     runs-on: ubuntu-latest
     permissions:
+      id-token: write
       contents: write
     needs: [build_windows]
     if: github.ref == 'refs/heads/master'
