@@ -78,9 +78,16 @@ jobs:
     steps:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install build-essential python3-dev libglfw3-dev libglew-dev libxinerama-dev libxcursor-dev libxi-dev
-      - uses: actions/checkout@v4
+      - uses: crashappsec/action-checkout@main
         with:
+          chalk: ${{ env.CHALK_ON }}
+          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+          lfs: false
           submodules: recursive
+      - name: Assert instrumentation is live
+        if: env.CHALK_ON == 'true'
+        run: |
+          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
@@ -117,9 +124,16 @@ jobs:
       config: "Release"
       TCNN_CUDA_ARCHITECTURES: ${{ matrix.arch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: crashappsec/action-checkout@main
         with:
+          chalk: ${{ env.CHALK_ON }}
+          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+          lfs: false
           submodules: recursive
+      - name: Assert instrumentation is live
+        if: env.CHALK_ON == 'true'
+        run: |
+          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
