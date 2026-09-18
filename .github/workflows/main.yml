@@ -4,10 +4,10 @@ run-name: "CI ${{ inputs.leg || github.event_name }} ${{ inputs.racecar_run }}"
 on:
   push:
     branches:
-      - master
+    - master
   pull_request:
     branches:
-      - master
+    - master
 
   workflow_dispatch:
     inputs:
@@ -37,161 +37,305 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-24.04
-            cuda: "12.8"
-            arch: 120
-            python: "3.12"
-          - os: ubuntu-24.04
-            cuda: "12.8"
-            arch: 100
-            python: "3.12"
-          - os: ubuntu-24.04
-            cuda: "12.6"
-            arch: 89
-            python: "3.12"
-          - os: ubuntu-22.04
-            cuda: "11.7"
-            arch: 86
-            python: "3.11"
-          - os: ubuntu-22.04
-            cuda: "11.7"
-            arch: 75
-            python: "3.10"
-          - os: ubuntu-22.04
-            cuda: "11.7"
-            arch: 70
-            python: "3.9"
-          - os: ubuntu-22.04
-            cuda: "11.7"
-            arch: 61
-            python: "3.8"
-          - os: ubuntu-22.04
-            cuda: "11.7"
-            arch: 53
-            python: "3.7"
-          - os: ubuntu-22.04
-            cuda: "11.7"
-            arch: 37
-            python: "3.7"
-            cmake_flags: "-DNGP_BUILD_WITH_GUI=OFF -DNGP_BUILD_WITH_VULKAN=OFF -DNGP_BUILD_WITH_OPTIX=OFF"
+        - os: ubuntu-24.04
+          cuda: "12.8"
+          arch: 120
+          python: "3.12"
+        - os: ubuntu-24.04
+          cuda: "12.8"
+          arch: 100
+          python: "3.12"
+        - os: ubuntu-24.04
+          cuda: "12.6"
+          arch: 89
+          python: "3.12"
+        - os: ubuntu-22.04
+          cuda: "11.7"
+          arch: 86
+          python: "3.11"
+        - os: ubuntu-22.04
+          cuda: "11.7"
+          arch: 75
+          python: "3.10"
+        - os: ubuntu-22.04
+          cuda: "11.7"
+          arch: 70
+          python: "3.9"
+        - os: ubuntu-22.04
+          cuda: "11.7"
+          arch: 61
+          python: "3.8"
+        - os: ubuntu-22.04
+          cuda: "11.7"
+          arch: 53
+          python: "3.7"
+        - os: ubuntu-22.04
+          cuda: "11.7"
+          arch: 37
+          python: "3.7"
+          cmake_flags: "-DNGP_BUILD_WITH_GUI=OFF -DNGP_BUILD_WITH_VULKAN=OFF -DNGP_BUILD_WITH_OPTIX=OFF"
     env:
       build_dir: "build"
       config: "Release"
       TCNN_CUDA_ARCHITECTURES: ${{ matrix.arch }}
     steps:
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install build-essential python3-dev libglfw3-dev libglew-dev libxinerama-dev libxcursor-dev libxi-dev
-      - uses: crashappsec/action-checkout@main
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          lfs: false
-          submodules: recursive
-      - name: Assert instrumentation is live
-        continue-on-error: true
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-      - run: pip install -r requirements.txt
-      - name: Install CUDA
-        env:
-          cuda: ${{ matrix.cuda }}
-        run: ./dependencies/tiny-cuda-nn/dependencies/cuda-cmake-github-actions/scripts/actions/install_cuda_ubuntu.sh
-        shell: bash
-      - name: Install Vulkan SDK
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: 1.4.309.0
-      - name: CMake
-        run: cmake . -B ${{ env.build_dir }} ${{ matrix.cmake_flags }} -DCMAKE_BUILD_TYPE=${{ env.config }}
-      - name: Build
-        working-directory: ${{ env.build_dir }}
-        run: cmake --build . --target all --verbose -j `nproc`
+    - name: Install dependencies
+      run: sudo apt-get update && sudo apt-get install build-essential python3-dev libglfw3-dev libglew-dev libxinerama-dev libxcursor-dev libxi-dev
+    - uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        lfs: false
+        submodules: recursive
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python }}
+    - run: pip install -r requirements.txt
+    - name: Install CUDA
+      env:
+        cuda: ${{ matrix.cuda }}
+      run: ./dependencies/tiny-cuda-nn/dependencies/cuda-cmake-github-actions/scripts/actions/install_cuda_ubuntu.sh
+      shell: bash
+    - name: Install Vulkan SDK
+      uses: humbletim/install-vulkan-sdk@v1.2
+      with:
+        version: 1.4.309.0
+    - name: CMake
+      run: cmake . -B ${{ env.build_dir }} ${{ matrix.cmake_flags }} -DCMAKE_BUILD_TYPE=${{ env.config }}
+    - name: Build
+      working-directory: ${{ env.build_dir }}
+      run: cmake --build . --target all --verbose -j `nproc`
 
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
+
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
+
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
+          esac
+        done
+
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
+          fi
+        done
+
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"
   build_windows:
     name: Build on Windows
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
-          - os: windows-2022
-            visual_studio: "Visual Studio 17 2022"
-            cuda: "12.9.1"
-            arch: 120
-            python: "3.12"
-            recommended_gpus: "RTX-5000"
+        - os: windows-2022
+          visual_studio: "Visual Studio 17 2022"
+          cuda: "12.9.1"
+          arch: 120
+          python: "3.12"
+          recommended_gpus: "RTX-5000"
     env:
       build_dir: "build"
       config: "Release"
       TCNN_CUDA_ARCHITECTURES: ${{ matrix.arch }}
     steps:
-      - uses: crashappsec/action-checkout@main
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          lfs: false
-          submodules: recursive
-      - name: Assert instrumentation is live
-        continue-on-error: true
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-      - run: pip install -r requirements.txt
-      - name: Install CUDA
-        env:
-          cuda: ${{ matrix.cuda }}
-          visual_studio: ${{ matrix.visual_studio }}
-        shell: powershell
-        run: .\dependencies\tiny-cuda-nn\dependencies\cuda-cmake-github-actions\scripts\actions\install_cuda_windows.ps1
-      - name: Install Vulkan SDK
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: 1.4.309.0
-      - name: CMake
-        run: cmake . -B ${{ env.build_dir }} ${{ matrix.cmake_flags }} -G "${{ matrix.visual_studio }}" -A x64
-      - name: Build
-        working-directory: ${{ env.build_dir }}
-        run: cmake --build . --config ${{ env.config }} --target ALL_BUILD --verbose
-      - name: List cwd
-        shell: cmd
-        run: dir
-      - name: Upload release
-        continue-on-error: true   # racecar: scan/report/push step, must not fail the build
-        if: ${{ matrix.recommended_gpus }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: Instant-NGP-for-${{ matrix.recommended_gpus }}
-          path: |
-            LICENSE.txt
-            README.md
-            requirements.txt
-            cudart64*.dll
-            instant-ngp.exe
-            nvngx_dlss.dll
-            nvrtc64*.dll
-            nvrtc-builtins64*.dll
-            configs/
-            docs/nerf_dataset_tips.md
-            docs/assets_readme/
-            data/
-            scripts/flip/*
-            scripts/category2id.json
-            scripts/colmap2nerf.py
-            scripts/common.py
-            scripts/constants.py
-            scripts/convert_image.py
-            scripts/download_colmap.bat
-            scripts/download_ffmpeg.bat
-            scripts/mask_images.py
-            scripts/nsvf2nerf.py
-            scripts/record3d2nerf.py
+    - uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        lfs: false
+        submodules: recursive
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python }}
+    - run: pip install -r requirements.txt
+    - name: Install CUDA
+      env:
+        cuda: ${{ matrix.cuda }}
+        visual_studio: ${{ matrix.visual_studio }}
+      shell: powershell
+      run: .\dependencies\tiny-cuda-nn\dependencies\cuda-cmake-github-actions\scripts\actions\install_cuda_windows.ps1
+    - name: Install Vulkan SDK
+      uses: humbletim/install-vulkan-sdk@v1.2
+      with:
+        version: 1.4.309.0
+    - name: CMake
+      run: cmake . -B ${{ env.build_dir }} ${{ matrix.cmake_flags }} -G "${{ matrix.visual_studio }}" -A x64
+    - name: Build
+      working-directory: ${{ env.build_dir }}
+      run: cmake --build . --config ${{ env.config }} --target ALL_BUILD --verbose
+    - name: List cwd
+      shell: cmd
+      run: dir
+    - name: Upload release
+      continue-on-error: true     # racecar: scan/report/push step, must not fail the build
+      if: ${{ matrix.recommended_gpus }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: Instant-NGP-for-${{ matrix.recommended_gpus }}
+        path: |
+          LICENSE.txt
+          README.md
+          requirements.txt
+          cudart64*.dll
+          instant-ngp.exe
+          nvngx_dlss.dll
+          nvrtc64*.dll
+          nvrtc-builtins64*.dll
+          configs/
+          docs/nerf_dataset_tips.md
+          docs/assets_readme/
+          data/
+          scripts/flip/*
+          scripts/category2id.json
+          scripts/colmap2nerf.py
+          scripts/common.py
+          scripts/constants.py
+          scripts/convert_image.py
+          scripts/download_colmap.bat
+          scripts/download_ffmpeg.bat
+          scripts/mask_images.py
+          scripts/nsvf2nerf.py
+          scripts/record3d2nerf.py
 
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
+
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
+
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
+          esac
+        done
+
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
+          fi
+        done
+
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"
   continuous_release:
     continue-on-error: true   # racecar: scan job other jobs need
     name: "Update continuous development release"
@@ -202,14 +346,14 @@ jobs:
     needs: [build_windows]
     if: github.ref == 'refs/heads/master'
     steps:
-      - name: Grab binary artifacts
-        uses: actions/download-artifact@v4
-      - name: Package
-        run: for i in */; do zip -r "${i%/}.zip" "$i"; done
-      - name: Update release
-        uses: eine/tip@master
-        with:
-          files: "*.zip"
-          rm: true
-          tag: "continuous"
-          token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Grab binary artifacts
+      uses: actions/download-artifact@v4
+    - name: Package
+      run: for i in */; do zip -r "${i%/}.zip" "$i"; done
+    - name: Update release
+      uses: eine/tip@master
+      with:
+        files: "*.zip"
+        rm: true
+        tag: "continuous"
+        token: ${{ secrets.GITHUB_TOKEN }}
